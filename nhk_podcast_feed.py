@@ -9,7 +9,7 @@ from html import unescape
 
 SOURCE_FEED_URL = "https://nhkeasier.com/feed/"
 BASE_URL = "https://nhkeasier.com"
-BITRATE_BPS = 192000
+BITRATE_BPS = 192000  # 192 kbps
 
 NAMESPACES = {
     'itunes': 'http://www.itunes.com/dtds/podcast-1.0.dtd',
@@ -34,7 +34,6 @@ def fix_relative_urls(html_content: str) -> str:
     """Prepends BASE_URL to relative src and href attributes."""
     if not html_content:
         return html_content
-    # Matches src="/..." or href="/..." but not protocol-relative "//"
     pattern = r'(src|href)=["\']/(?!/)([^"\']+)["\']'
     replacement = rf'\1="{BASE_URL}/\2"'
     return re.sub(pattern, replacement, html_content)
@@ -54,7 +53,8 @@ def format_duration(file_size_bytes: int) -> str:
     """Estimates duration in HH:MM:SS based on a fixed bitrate."""
     if file_size_bytes <= 0:
         return "00:00"
-
+    
+    # Calculation: (Bytes * 8 bits) / Bits per second
     total_seconds = int(file_size_bytes * 8 / BITRATE_BPS)
     
     hours, remainder = divmod(total_seconds, 3600)
@@ -65,6 +65,7 @@ def format_duration(file_size_bytes: int) -> str:
     return f"{minutes:02}:{seconds:02}"
 
 def transform_feed(source_xml: str) -> str:
+    # Remove duplicate namespace declarations to keep the XML clean
     source_xml = re.sub(r'(\s+xmlns:itunes="[^"]*")(\s+xmlns:itunes="[^"]*")+', r'\1', source_xml)
 
     for prefix, uri in NAMESPACES.items():
@@ -74,11 +75,12 @@ def transform_feed(source_xml: str) -> str:
     channel = root.find('channel')
 
     if channel is None:
-        print("Error: No channel element found in the feed.", file=sys.stderr)
+        print("Error: No channel element found.", file=sys.stderr)
         sys.exit(1)
 
     itunes_ns = NAMESPACES['itunes']
 
+    # Set channel-level iTunes metadata
     tags = {
         'author': "NHK Easier",
         'summary': "Audio version of NHK Easier articles",
@@ -99,8 +101,10 @@ def transform_feed(source_xml: str) -> str:
             items_to_remove.append(item)
             continue
 
+        # 1. Update relative URLs in description
         description_elem.text = fix_relative_urls(description_elem.text)
 
+        # 2. Extract MP3 for enclosure
         mp3_url = extract_mp3_url(description_elem.text)
         if not mp3_url:
             items_to_remove.append(item)
@@ -108,6 +112,7 @@ def transform_feed(source_xml: str) -> str:
 
         file_size = get_mp3_size(mp3_url)
 
+        # 3. Handle Enclosure
         enclosure = item.find('enclosure')
         if enclosure is None:
             enclosure = ET.SubElement(item, 'enclosure')
@@ -115,33 +120,30 @@ def transform_feed(source_xml: str) -> str:
             enclosure.set('type', 'audio/mpeg')
             enclosure.set('length', str(file_size))
 
+        # 4. Corrected itunes:duration (Fixed the namespace string!)
         if item.find(f'{{{itunes_ns}}}duration') is None:
             duration_text = format_duration(file_size)
-            duration_elem = ET.SubElement(item, f'{{{itunes_ns}}}{{duration}}')
-            duration_elem.text = duration_text
+            ET.SubElement(item, f'{{{itunes_ns}}}duration').text = duration_text
 
     for item in items_to_remove:
         channel.remove(item)
 
+    # Return as string with XML declaration
     return ET.tostring(root, encoding='unicode', xml_declaration=True)
 
 def main():
-    parser = argparse.ArgumentParser(description="Transform NHK Easier feed for podcast apps")
-    parser.add_argument('--source-url', type=str, default=SOURCE_FEED_URL, help='URL of the source feed')
-    parser.add_argument('--output-file', type=str, help='File to write to (defaults to stdout)')
+    parser = argparse.ArgumentParser(description="NHK Easier Feed Transformer")
+    parser.add_argument('--source-url', type=str, default=SOURCE_FEED_URL)
+    parser.add_argument('--output-file', type=str)
     args = parser.parse_args()
 
     try:
-        print(f"Fetching: {args.source_url}", file=sys.stderr)
         source_xml = fetch_feed(args.source_url)
-
-        print("Transforming...", file=sys.stderr)
         transformed_xml = transform_feed(source_xml)
 
         if args.output_file:
             with open(args.output_file, 'w', encoding='utf-8') as f:
                 f.write(transformed_xml)
-            print(f"Saved to {args.output_file}", file=sys.stderr)
         else:
             print(transformed_xml)
     except Exception as e:
