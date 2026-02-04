@@ -1,4 +1,4 @@
-#!/user/bin/env python3
+#!/usr/bin/env python3
 
 import argparse
 import re
@@ -20,13 +20,11 @@ def fetch_feed(url: str) -> str:
 
 def extract_mp3_url(description: str) -> str | None:
     unescaped = unescape(description)
-    match = re.search(r'<audio[^>]+src=["\']?([^"\'>\s]+\.mp3)', unescape, re.IGNORECASE)
+    match = re.search(r'<audio[^>]+src=["\']?([^"\'>\s]+\.mp3)', unescaped, re.IGNORECASE)
     if match:
         mp3_path = match.group(1)
         if mp3_path.startswith('/'):
             return f"https://nhkeasier.com{mp3_path}"
-        elif mp3_path.startswith('http'):
-            return f"https://nhkeasier.com/{mp3_path}"
         return mp3_path
     return None
 
